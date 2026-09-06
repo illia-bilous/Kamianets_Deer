@@ -25,6 +25,7 @@
     </div>
     <script>
       var canvas = document.querySelector("#unity-canvas");
+      // Unity buffer is landscape, but WallImage / SidePanel are authored at z=90.
       var gameWidth = 1920;
       var gameHeight = 1080;
 
@@ -36,7 +37,8 @@
         var ch = container.clientHeight;
         if (cw <= 0 || ch <= 0) return;
 
-        var scale = Math.min(cw / gameWidth, ch / gameHeight);
+        // After rotate(90deg) the visible box is 1080×1920.
+        var scale = Math.min(cw / gameHeight, ch / gameWidth);
         var displayW = Math.floor(gameWidth * scale);
         var displayH = Math.floor(gameHeight * scale);
 
@@ -44,7 +46,87 @@
         canvas.style.height = displayH + "px";
         canvas.style.left = Math.floor((cw - displayW) / 2) + "px";
         canvas.style.top = Math.floor((ch - displayH) / 2) + "px";
+        canvas.style.transform = "rotate(90deg)";
+        canvas.style.transformOrigin = "center center";
       }
+
+      function getUnrotatedRect() {
+        var container = document.querySelector("#unity-container");
+        var cr = container.getBoundingClientRect();
+        var w = parseFloat(canvas.style.width);
+        var h = parseFloat(canvas.style.height);
+        if (!(w > 0) || !(h > 0)) {
+          return HTMLElement.prototype.getBoundingClientRect.call(canvas);
+        }
+        var left = cr.left + (parseFloat(canvas.style.left) || 0);
+        var top = cr.top + (parseFloat(canvas.style.top) || 0);
+        return new DOMRect(left, top, w, h);
+      }
+
+      canvas.getBoundingClientRect = function () {
+        return getUnrotatedRect();
+      };
+
+      function remapPoint(clientX, clientY, rect) {
+        var cx = rect.left + rect.width / 2;
+        var cy = rect.top + rect.height / 2;
+        var dx = clientX - cx;
+        var dy = clientY - cy;
+        return {
+          x: rect.left + rect.width / 2 + dy,
+          y: rect.top + rect.height / 2 - dx,
+        };
+      }
+
+      function patchPoint(pt, rect) {
+        if (!pt) return;
+        var mapped = remapPoint(pt.clientX, pt.clientY, rect);
+        var dx = mapped.x - pt.clientX;
+        var dy = mapped.y - pt.clientY;
+        var pageX = pt.pageX + dx;
+        var pageY = pt.pageY + dy;
+        var screenX = pt.screenX + dx;
+        var screenY = pt.screenY + dy;
+        try {
+          Object.defineProperty(pt, "clientX", { value: mapped.x, configurable: true });
+          Object.defineProperty(pt, "clientY", { value: mapped.y, configurable: true });
+          Object.defineProperty(pt, "pageX", { value: pageX, configurable: true });
+          Object.defineProperty(pt, "pageY", { value: pageY, configurable: true });
+          Object.defineProperty(pt, "screenX", { value: screenX, configurable: true });
+          Object.defineProperty(pt, "screenY", { value: screenY, configurable: true });
+          if ("offsetX" in pt) {
+            Object.defineProperty(pt, "offsetX", { value: mapped.x - rect.left, configurable: true });
+            Object.defineProperty(pt, "offsetY", { value: mapped.y - rect.top, configurable: true });
+          }
+        } catch (err) {}
+      }
+
+      function patchPointerEvent(event) {
+        var rect = getUnrotatedRect();
+        patchPoint(event, rect);
+        var lists = [event.touches, event.changedTouches, event.targetTouches];
+        for (var i = 0; i < lists.length; i++) {
+          var list = lists[i];
+          if (!list) continue;
+          for (var j = 0; j < list.length; j++) patchPoint(list[j], rect);
+        }
+      }
+
+      [
+        "mousedown",
+        "mouseup",
+        "mousemove",
+        "click",
+        "pointerdown",
+        "pointerup",
+        "pointermove",
+        "touchstart",
+        "touchend",
+        "touchmove",
+        "touchcancel",
+      ].forEach(function (type) {
+        window.addEventListener(type, patchPointerEvent, true);
+      });
 
       function unityShowBanner(msg, type) {
         var warningBanner = document.querySelector("#unity-warning");

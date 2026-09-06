@@ -28,6 +28,8 @@ html, body {
 #unity-canvas {
   background: #231F20;
   position: absolute;
+  transform: rotate(90deg);
+  transform-origin: center center;
 }
 
 .unity-mobile #unity-canvas {
